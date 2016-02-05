@@ -7,6 +7,7 @@
 
 #include <ESP8266WiFi.h>  // Include the ESP8266 WiFi library. (Works a lot like the Arduino WiFi library.)
 #include <ESP8266HTTPClient.h> // Include the ESP8266 wifi http client. 
+#include <ESP8266WebServer.h>
 #include <OneWire.h>
 #include <Phant.h>
 
@@ -52,7 +53,9 @@ OneWire  ds(D6);  // on pin 10 (a 4.7K resistor is necessary)
 const unsigned long postRate = 30 * 1000;
 
 
-WiFiClient client; // Create an ESP8266 WiFiClient class to connect 
+WiFiClient        client; // Create an ESP8266 WiFiClient class to connect 
+ESP8266WebServer  server(80);
+
 byte ledStatus = LOW;     
 
 void setup() {
@@ -65,7 +68,13 @@ void setup() {
   delay(10); // The serial port takes a little bit of time to fully start up. 
   Serial.println(""); Serial.println(""); Serial.println("");
   Serial.println("[info] VHS - ESP + DS1820");
+
+  // Set up the webserver
+  server.on("/", handleRoot);
+  server.on("/config", handleConfig);
+  server.begin();
 }
+
 
 void loop()
 {
@@ -75,8 +84,11 @@ void loop()
     return ; 
   }
 
+  // Check for incoming HTTP requests and proccess them if needed. 
+  server.handleClient();
 
-  
+
+  // Check the tempature and update the server if needed. 
   static unsigned long previousMillisTemp = 0 ; 
   unsigned long currentMillisTemp = millis();
   if(currentMillisTemp - previousMillisTemp >= postRate ) 
@@ -86,20 +98,20 @@ void loop()
     digitalWrite(BUILTIN_LED, ledStatus);
 
     // Get the temp 
-    float celsius = 0.0f; 
+    float celsius = 0.0f;
     if( GetTemp (&celsius ) ){
       phant.add("celsius", celsius);
 
       HTTPClient http;
       http.begin(phant.url()); //HTTP
-      Serial.println("[HTTP] GET " +String(phant.url()) );
+      Serial.println("[HTTP.Client] GET " +String(phant.url()) );
       // start connection and send HTTP header
       int httpCode = http.GET();
 
       // httpCode will be negative on error
       if(httpCode > 0) {
           // HTTP header has been send and Server response header has been handled
-          Serial.printf("[HTTP] http.code: %d\n", httpCode);
+          Serial.printf("[HTTP.Client] http.code: %d\n", httpCode);
 
           // file found at server
           if(httpCode == HTTP_CODE_OK) {
@@ -107,7 +119,7 @@ void loop()
               Serial.println(payload);
           }
       } else {
-          Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+          Serial.printf("[HTTP.Client] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
       }
       http.end();
 
@@ -132,9 +144,15 @@ bool GetTemp (float * celsius ) {
     return false; 
   }
   
+  // There is an issue here that if there are more then one sensor we want to be able to get the current temp from each one. 
+  // ToDo: what do we do if there is more then one temp sensor? 
+  // Teh following command will reset the search so only the first sensor will ever be found. 
+  ds.reset_search();
+
+  // Search the OneWire bus for a device. 
   if ( !ds.search(addr)) {
-    ds.reset_search();
     Serial.println("[OneWire] FYI: No more oneWire Sensors found " );
+    ds.reset_search(); // Reset the search back to the start. 
     return false; 
   }
   
@@ -221,7 +239,44 @@ bool GetTemp (float * celsius ) {
   return true; 
 }
 
+void handleConfig() {
+  Serial.println("[HTTP.Server] HTTP.Requst GET /config");
+  String message = "<h1>VHS: ESP + DS1820 - Configuration page</h1>";
+  message += String( "ToDo: Do the SoftAP configuration here. Set up the WiFi and the public and private key for data.sparkfun.com");
 
+  message += String( "<h2>WiFi configuration</h2>");
+  message += String( "<label>SSID: <select><option>ONE ONE ONE</option><option>TWO TWO TWO</option></select></label><br />");
+  message += String( "<label>Password: <input type='text' /></label><br />");
+
+  message += String( "<h2>Phant configuration</h2>");
+  message += String( "<label>PhantHost: <input type='text' value='data.sparkfun.com' /></label><br />");
+  message += String( "<label>PublicKey: <input type='text' value=''/></label><br />");
+  message += String( "<label>PrivateKey: <input type='text' value=''/></label><br />");
+
+  message += String( "<br /><br />");
+  message += String( "<input type='submit' />");
+
+  message += String( "<p><a href='/'>Go back home...</a></p>");
+  server.send(200, "text/html", message);
+}
+
+
+void handleRoot() {
+  Serial.println("[HTTP.Server] HTTP.Requst GET /");
+
+  String message = "<h1>VHS: ESP + DS1820</h1>";
+
+  float celsius = 0.0f;
+  // Check to see if we can get the current Temperature 
+  if( GetTemp (&celsius ) ){
+    message += String( "<p>Celsius=") + String( celsius ) + String("</p>");    
+  } else {
+    message += String( "<p>Error: Could not get the current Temperature</p>");
+  }
+
+  message += String( "<p><a href='/config'>Configure this device...</a></p>");
+  server.send(200, "text/html", message );
+}
 
 void connectWiFi()
 {
