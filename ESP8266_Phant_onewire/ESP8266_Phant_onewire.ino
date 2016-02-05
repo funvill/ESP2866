@@ -13,15 +13,15 @@
 //////////////////////
 // WiFi Definitions //
 //////////////////////
-const char WiFiSSID[] = "AliceInWonderLAN_2.4ghz";   // YOUR SSID 
-const char WiFiPSK[]  = "SamuraiJack!";              // YOUR PASSWORD 
+const char WiFiSSID[] = "xxx";   // YOUR SSID 
+const char WiFiPSK[]  = "xxx";              // YOUR PASSWORD 
 
 ///////////
 // Phant // 
 ///////////
 const char PhantHost[]  = "data.sparkfun.com";
-const char PublicKey[]  = "VGXNn1WangTMQg6G8Qr2";  // Your public key 
-const char PrivateKey[] = "9Ygo8kqj8ZswRbYemRz5";  // Your private key 
+const char PublicKey[]  = "xxx";  // Your public key 
+const char PrivateKey[] = "xxx";  // Your private key 
 
 Phant phant("data.sparkfun.com", PublicKey, PrivateKey);
 
