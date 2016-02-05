@@ -25,15 +25,15 @@
 
 /************************* WiFi Access Point *********************************/
 
-#define WLAN_SSID       "... YOUR SSID ...." // ... YOUR SSID ....
-#define WLAN_PASS       "... YOUR WIFI PASSWORD ... " // ... YOUR WIFI PASSWORD ... 
+#define WLAN_SSID       "AliceInWonderLAN_2.4ghz" // ... YOUR SSID ....
+#define WLAN_PASS       "SamuraiJack!" // 
 
 /************************* Adafruit.io Setup *********************************/
 
 #define AIO_SERVER      "io.adafruit.com"
 #define AIO_SERVERPORT  1883
-#define AIO_USERNAME    "...your AIO username (see https://accounts.adafruit.com)..." // ...your AIO username (see https://accounts.adafruit.com)...
-#define AIO_KEY         "...your AIO key..." // ...your AIO key...
+#define AIO_USERNAME    "funvill" // ...your AIO username (see https://accounts.adafruit.com)..."
+#define AIO_KEY         "2676955586871c945ad8833e66e8f6eef88345b4" // ...your AIO key..."
 
 
 const unsigned long pollDelay = 1000*10 ; 
