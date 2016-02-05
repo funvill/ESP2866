@@ -1,3 +1,10 @@
+/**
+ * Created: 5 Feb 2016 
+ * Created by: Steven Smethurst
+ * 
+ * More information: https://github.com/funvill/ESP2866
+ */
+
 #include <ESP8266WiFi.h>  // Include the ESP8266 WiFi library. (Works a lot like the Arduino WiFi library.)
 #include <ESP8266HTTPClient.h> // Include the ESP8266 wifi http client. 
 #include <OneWire.h>
@@ -6,81 +13,93 @@
 //////////////////////
 // WiFi Definitions //
 //////////////////////
-const char WiFiSSID[] = "xxxx";   // ... YOUR SSID ....
-const char WiFiPSK[] = "xxxx"; // ... YOUR PASSWORD ....
+const char WiFiSSID[] = "AliceInWonderLAN_2.4ghz";   // YOUR SSID 
+const char WiFiPSK[]  = "SamuraiJack!";              // YOUR PASSWORD 
 
-////////////////
-// Phant Keys //
-////////////////
-const char PhantHost[] = "data.sparkfun.com";
-const char PublicKey[] = "xxxx"; // Your public key 
-const char PrivateKey[] = "xxxx";  // Your private key 
+///////////
+// Phant // 
+///////////
+const char PhantHost[]  = "data.sparkfun.com";
+const char PublicKey[]  = "VGXNn1WangTMQg6G8Qr2";  // Your public key 
+const char PrivateKey[] = "9Ygo8kqj8ZswRbYemRz5";  // Your private key 
 
 Phant phant("data.sparkfun.com", PublicKey, PrivateKey);
 
-
-/////////////////////
-// One Wire        //
-/////////////////////
-const int ONE_WIRE_BUS = D6; 
-OneWire  ds(ONE_WIRE_BUS);  // on pin 10 (a 4.7K resistor is necessary)
-
-
+//////////////
+// One Wire //
+//////////////
+OneWire  ds(D6);  // on pin 10 (a 4.7K resistor is necessary)
 
 /////////////////
 // Post Timing //
 /////////////////
-const unsigned long postRate = 30000;
-unsigned long lastPost = 0;
+
+/* 
+ * How much data can I push?
+ * Each stream has a maximum of 50mb. After you hit the limit, the oldest data 
+ * will be erased. (These limitations can be removed if installed on your own 
+ * server). Logging is limited to 100 pushes in a 15 minute window. This allows 
+ * you to push data in bursts, or spread them out over the 15 minute window.
+ * Source: https://data.sparkfun.com/
+ * 
+ * There are 900 seconds in 15 mins. The MAX frequency that we can update the 
+ * server is once every 9 secs 
+ * 
+ * The time is mesured in milliseconds. 
+ *     1000 =  1 second
+ *    30000 = 30 seconds. 
+ */
+const unsigned long postRate = 30 * 1000;
 
 
 WiFiClient client; // Create an ESP8266 WiFiClient class to connect 
-
 byte ledStatus = LOW;     
 
 void setup() {
-  pinMode(BUILTIN_LED, OUTPUT);
-  
-  Serial.begin(115200);
-  delay(10); 
-  Serial.println("VHS - ESP + DS1820");
 
-  connectWiFi();
+  // Set up the status LED 
+  pinMode(BUILTIN_LED, OUTPUT);
+
+  // Set up the serial port 
+  Serial.begin(115200);
+  delay(10); // The serial port takes a little bit of time to fully start up. 
+  Serial.println(""); Serial.println(""); Serial.println("");
+  Serial.println("[info] VHS - ESP + DS1820");
 }
 
 void loop()
 {
+  // If we are not connected to the network then we should to connect.  
+  if (WiFi.status() != WL_CONNECTED) { 
+    connectWiFi();
+    return ; 
+  }
+
+
+  
   static unsigned long previousMillisTemp = 0 ; 
   unsigned long currentMillisTemp = millis();
-  if(currentMillisTemp - previousMillisTemp >= postRate ) {
-    previousMillisTemp = currentMillisTemp;   
-
+  if(currentMillisTemp - previousMillisTemp >= postRate ) 
+  {   
     // Flip the LED 
     ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
     digitalWrite(BUILTIN_LED, ledStatus);
 
     // Get the temp 
     float celsius = 0.0f; 
-    if( ! GetTemp (&celsius ) ){
-      Serial.println("Error could not get temp" );
-    } else {
-      Serial.println("celsius="+ String(celsius) );  
-
+    if( GetTemp (&celsius ) ){
       phant.add("celsius", celsius);
-      // Serial.println("----TEST URL-----");
-      // Serial.println(phant.url());      
-
 
       HTTPClient http;
       http.begin(phant.url()); //HTTP
-      Serial.println("[HTTP] GET..." +String(phant.url()) );
+      Serial.println("[HTTP] GET " +String(phant.url()) );
       // start connection and send HTTP header
       int httpCode = http.GET();
 
       // httpCode will be negative on error
       if(httpCode > 0) {
           // HTTP header has been send and Server response header has been handled
-          Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+          Serial.printf("[HTTP] http.code: %d\n", httpCode);
 
           // file found at server
           if(httpCode == HTTP_CODE_OK) {
@@ -91,8 +110,14 @@ void loop()
           Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
       }
       http.end();
+
+      // Only do this at the end. If there is an error and we don't sent to the server 
+      // We want to try again ASAP. 
+      previousMillisTemp = currentMillisTemp;         
     }
   }
+
+  delay(100);
 }
 
 
@@ -109,11 +134,11 @@ bool GetTemp (float * celsius ) {
   
   if ( !ds.search(addr)) {
     ds.reset_search();
-    Serial.println("FYI: No more oneWire Sensors found " );
+    Serial.println("[OneWire] FYI: No more oneWire Sensors found " );
     return false; 
   }
   
-  Serial.print("Address: ");
+  Serial.print("[OneWire] Address: ");
   for( i = 0; i < 8; i++) {
     if( addr[i] < 10 ) { 
       Serial.print("0");
@@ -131,19 +156,19 @@ bool GetTemp (float * celsius ) {
   // the first ROM byte indicates which chip
   switch (addr[0]) {
     case 0x10:
-      // Serial.println("  Chip = DS18S20");  // or old DS1820
+      Serial.print("Chip = DS18S20, ");  // or old DS1820
       type_s = 1;
       break;
-    case 0x28:
-      // Serial.println("  Chip = DS18B20");
+    case 0x28: // We have this one 
+      Serial.print("Chip = DS18B20, ");
       type_s = 0;
       break;
     case 0x22:
-      // Serial.println("  Chip = DS1822");
+      Serial.print("Chip = DS1822, ");
       type_s = 0;
       break;
     default:
-      Serial.println("Device is not a DS18x20 family device.");
+      Serial.println("[OneWire] Device is not a DS18x20 family device.");
       return false; 
   } 
 
@@ -190,7 +215,7 @@ bool GetTemp (float * celsius ) {
     //// default is 12 bit resolution, 750 ms conversion time
   }
   *celsius = (float)raw / 16.0;
-  Serial.print("  Temperature = ");
+  Serial.print("Temperature = ");
   Serial.print(*celsius);
   Serial.println(" Celsius");
   return true; 
@@ -200,8 +225,9 @@ bool GetTemp (float * celsius ) {
 
 void connectWiFi()
 {
-  Serial.print("Connecting to ");
-  Serial.println(WiFiSSID);
+  Serial.println(""); 
+  Serial.print("[Wifi] Connecting to ");
+  Serial.print(WiFiSSID);
     
   // Set WiFi mode to station (as opposed to AP or AP_STA)
   WiFi.mode(WIFI_STA);
@@ -227,10 +253,11 @@ void connectWiFi()
     // tasks -- wherever possible.
     Serial.print(".");
   }
-
+  Serial.println("");
+  
   // Print the wifi connection details. 
-  Serial.println("WiFi connected");
-  Serial.println("IP address: "); 
+  Serial.println("[Wifi] WiFi connected");
+  Serial.print("[Wifi] IP address: "); 
   Serial.println(WiFi.localIP());  
 }
 
