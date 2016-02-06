@@ -15,13 +15,13 @@
 // EPROM MEMORY //
 //////////////////
 // WiFi 
-char EEPROM_WiFiSSID[32] = "" ;  // YOUR SSID 
-char EEPROM_WiFiPassword[64] = "" ; // YOUR PASSWORD 
+char EEPROM_WiFiSSID[32] = "VHS-2.4" ;  // YOUR SSID 
+char EEPROM_WiFiPassword[64] = "7787857982" ; // YOUR PASSWORD 
 
 // Phant 
-char EEPROM_PhantHost[64] = " " ; 
-char EEPROM_PublicKey[21] = " ";  // Your public key 
-char EEPROM_PrivateKey[21] = " "; // Your private key 
+char EEPROM_PhantHost[64] = "data.sparkfun.com" ; 
+char EEPROM_PublicKey[21] = "VGXNn1WangTMQg6G8Qr2";  // Your public key 
+char EEPROM_PrivateKey[21] = "9Ygo8kqj8ZswRbYemRz5"; // Your private key 
 
 
 //////////////
@@ -77,67 +77,6 @@ void setup() {
   server.begin();
 }
 
-void WriteEEPROM() {
-  Serial.println("Writing EEPROM");
-  EEPROM.begin(512);
-  delay(10);
-
-  
-  for (int i = 0; i < 32; ++i) {
-    EEPROM.write(i, EEPROM_WiFiSSID[i]); 
-  }
-  for (int i = 32; i < 32+64; ++i) {
-    EEPROM.write(i, EEPROM_WiFiPassword[i-32] ); 
-  }
-  for (int i = 32+64; i < 32+64+64; ++i) {    
-    EEPROM.write(i, EEPROM_PhantHost[i-(32+64)] ); 
-  }
-  for (int i = 32+64+64; i < 32+64+64+21; ++i) {
-    EEPROM.write(i, EEPROM_PublicKey[i-(32+64+64)] );
-  }
-  for (int i = 32+64+64+21; i < 32+64+64+21+21; ++i) {
-    EEPROM.write(i, EEPROM_PrivateKey[i-(32+64+64+21)] );
-  }
-  EEPROM.commit();
-  Serial.println("Done...");
-}
-
-void ReadEEPROM() {
-  EEPROM.begin(512);
-  delay(10);
-
-  Serial.print("Reading EEPROM_WiFiSSID");
-  for (int i = 0; i < 32; ++i) {
-    EEPROM_WiFiSSID[i] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_WiFiSSID ) );
-
-  Serial.print("Reading EEPROM_WiFiPassword");
-  for (int i = 32; i < 32+64; ++i) {
-    EEPROM_WiFiPassword[i-32] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_WiFiPassword ) );
-
-  Serial.print("Reading EEPROM_PhantHost");
-  for (int i = 32+64; i < 32+64+64; ++i) {
-    EEPROM_PhantHost[i-(32+64)] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_PhantHost ) ); 
-  
-  Serial.print("Reading EEPROM_PublicKey");
-  for (int i = 32+64+64; i < 32+64+64+21; ++i) {
-    EEPROM_PublicKey[i-(32+64+64)] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_PublicKey ) );    
-  
-  Serial.print("Reading EEPROM_PrivateKey");
-  for (int i = 32+64+64+21; i < 32+64+64+21+21; ++i) {
-    EEPROM_PrivateKey[i-(32+64+64+21)] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_PrivateKey ) );  
-
-  
-}
 
 void loop()
 {
@@ -160,6 +99,9 @@ void loop()
     // Flip the LED 
     ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
     digitalWrite(BUILTIN_LED, ledStatus);
+
+    Serial.print("[Wifi] IP address: "); 
+    Serial.println(WiFi.localIP());
 
     // Get the temp 
     float celsius = 0.0f;
@@ -324,9 +266,28 @@ void handleConfig() {
   if( temp_WiFiSSID.length() > 0 && temp_WiFiPassword.length() > 0 && 
       temp_PhantHost.length() > 0 && temp_PublicKey.length() > 0 && temp_PrivateKey.length() > 0 ) 
   {
-    message += String( "UPDATE THE EEPROM");
-    // ToDo
+    message += String( "<h3>UPDATED THE EEPROM</h3>");
+    
+    message += String( "<table>");
+    message += String( "<tr><th>WiFiSSID</th><td>")+ temp_WiFiSSID + "</td></tr>";
+    message += String( "<tr><th>WiFiPassword</th><td>")+ temp_WiFiPassword + "</td></tr>";
+    message += String( "<tr><th>PhantHost</th><td>")+ temp_PhantHost + "</td></tr>";
+    message += String( "<tr><th>PublicKey</th><td>")+ temp_PublicKey + "</td></tr>";
+    message += String( "P<tr><th>rivateKey</th><td>")+ temp_PrivateKey + "</td></tr>";
+    message += String( "</table>");
+
+    temp_WiFiSSID.toCharArray(EEPROM_WiFiSSID, 32 ); 
+    temp_WiFiPassword.toCharArray(EEPROM_WiFiPassword, 64 ); 
+    temp_PhantHost.toCharArray(EEPROM_PhantHost, 64 ); 
+    temp_PublicKey.toCharArray(EEPROM_PublicKey, 21 ); 
+    temp_PrivateKey.toCharArray(EEPROM_PrivateKey, 21 ); 
+        
     WriteEEPROM();
+
+    message += "Done... Reconnecting...<a href='/'>Home</a><br />";
+    server.send(200, "text/html", message);
+    connectWiFi(30);
+    return ; 
   }
 
 
@@ -369,6 +330,67 @@ void handleRoot() {
 
   message += String( "<p><a href='/config'>Configure this device...</a></p>");
   server.send(200, "text/html", message );
+}
+
+
+void WriteEEPROM() {
+  Serial.println("Writing EEPROM");
+  EEPROM.begin(512);
+  delay(10);
+
+  
+  for (int i = 0; i < 32; ++i) {
+    EEPROM.write(i, EEPROM_WiFiSSID[i]); 
+  }
+  for (int i = 32; i < 32+64; ++i) {
+    EEPROM.write(i, EEPROM_WiFiPassword[i-32] ); 
+  }
+  for (int i = 32+64; i < 32+64+64; ++i) {    
+    EEPROM.write(i, EEPROM_PhantHost[i-(32+64)] ); 
+  }
+  for (int i = 32+64+64; i < 32+64+64+21; ++i) {
+    EEPROM.write(i, EEPROM_PublicKey[i-(32+64+64)] );
+  }
+  for (int i = 32+64+64+21; i < 32+64+64+21+21; ++i) {
+    EEPROM.write(i, EEPROM_PrivateKey[i-(32+64+64+21)] );
+  }
+  EEPROM.commit();
+  Serial.println("Done...");
+}
+
+void ReadEEPROM() {
+  EEPROM.begin(512);
+  delay(10);
+
+  Serial.print("Reading EEPROM_WiFiSSID");
+  for (int i = 0; i < 32; ++i) {
+    EEPROM_WiFiSSID[i] = char(EEPROM.read(i));
+  }
+  Serial.println(" = " + String( EEPROM_WiFiSSID ) );
+
+  Serial.print("Reading EEPROM_WiFiPassword");
+  for (int i = 32; i < 32+64; ++i) {
+    EEPROM_WiFiPassword[i-32] = char(EEPROM.read(i));
+  }
+  Serial.println(" = " + String( EEPROM_WiFiPassword ) );
+
+  Serial.print("Reading EEPROM_PhantHost");
+  for (int i = 32+64; i < 32+64+64; ++i) {
+    EEPROM_PhantHost[i-(32+64)] = char(EEPROM.read(i));
+  }
+  Serial.println(" = " + String( EEPROM_PhantHost ) ); 
+  
+  Serial.print("Reading EEPROM_PublicKey");
+  for (int i = 32+64+64; i < 32+64+64+21; ++i) {
+    EEPROM_PublicKey[i-(32+64+64)] = char(EEPROM.read(i));
+  }
+  Serial.println(" = " + String( EEPROM_PublicKey ) );    
+  
+  Serial.print("Reading EEPROM_PrivateKey");
+  for (int i = 32+64+64+21; i < 32+64+64+21+21; ++i) {
+    EEPROM_PrivateKey[i-(32+64+64+21)] = char(EEPROM.read(i));
+  }
+  Serial.println(" = " + String( EEPROM_PrivateKey ) );  
 }
 
 bool connectWiFi( unsigned char attempts )
