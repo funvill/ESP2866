@@ -3,21 +3,25 @@
  * Created by: Steven Smethurst
  * 
  * More information: https://github.com/funvill/ESP2866
+ * 
+ * https://github.com/tzapu/WiFiManager
  */
 
 #include <ESP8266WiFi.h>  // Include the ESP8266 WiFi library. (Works a lot like the Arduino WiFi library.)
 #include <ESP8266HTTPClient.h> // Include the ESP8266 wifi http client. 
 #include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h> // Gives the ESP a name on the network. 
 #include <OneWire.h>
 #include <EEPROM.h>
+
+//needed for library
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 
 //////////////////
 // EPROM MEMORY //
 //////////////////
-// WiFi 
-char EEPROM_WiFiSSID[32] = "VHS-2.4" ;  // YOUR SSID 
-char EEPROM_WiFiPassword[64] = "7787857982" ; // YOUR PASSWORD 
-
 // Phant 
 char EEPROM_PhantHost[64] = "data.sparkfun.com" ; 
 char EEPROM_PublicKey[21] = "VGXNn1WangTMQg6G8Qr2";  // Your public key 
@@ -53,10 +57,14 @@ const unsigned long postRate = 30 * 1000;
 
 WiFiClient        client; // Create an ESP8266 WiFiClient class to connect 
 ESP8266WebServer  server(80);
+MDNSResponder     mdns;
+char deviceName[32] ; 
 
 byte ledStatus = LOW;     
 
 void setup() {
+  // Generate the device name 
+  sprintf( deviceName, "ESP%d", ESP.getChipId() ); 
 
   // Set up the status LED 
   pinMode(BUILTIN_LED, OUTPUT);
@@ -66,10 +74,30 @@ void setup() {
   delay(10); // The serial port takes a little bit of time to fully start up. 
   Serial.println(""); Serial.println(""); Serial.println("");
   Serial.println("[info] VHS - ESP + DS1820");
+  Serial.println("[info] Chip: " + String( ESP.getChipId()) );  
 
+
+
+  // WiFiManager
+  // Local intialization. Once its business is done, there is no need to keep it around
+  WiFiManager wifiManager;
+  wifiManager.autoConnect(deviceName);
+  
+  // Print the wifi connection details. 
+  Serial.println("[Wifi] WiFi connected");
+  Serial.print("[Wifi] IP address: "); 
+  Serial.println(WiFi.localIP());
+
+  // Start the DNS 
+  // This allows you to type in the name of the ESP into a browser and
+  // It will show up. 
+  if (mdns.begin( deviceName , WiFi.localIP())) {
+    Serial.println("[Wifi] DNS Name: " + String(deviceName) ); 
+  }
+
+
+  // Read the presistent memory off the chip 
   ReadEEPROM(); 
-  // 
-
 
   // Set up the webserver
   server.on("/", handleRoot);
@@ -80,14 +108,17 @@ void setup() {
 
 void loop()
 {
+  
   // If we are not connected to the network then we should to connect.  
   if (WiFi.status() != WL_CONNECTED) { 
-    connectWiFi(30);
+    WiFiManager wifiManager;
+    wifiManager.autoConnect(deviceName);
     return ; 
   }
 
   // Check for incoming HTTP requests and proccess them if needed. 
   server.handleClient();
+  mdns.update(); 
 
   
 
@@ -255,29 +286,21 @@ bool GetTemp (float * celsius ) {
 void handleConfig() {
   Serial.println("[HTTP.Server] HTTP.Requst GET /config");
   String message = "<!DOCTYPE HTML>\r\n<html><h1>VHS: ESP + DS1820 - Configuration page</h1>";
-  message += String( "ToDo: Do the SoftAP configuration here. Set up the WiFi and the public and private key for data.sparkfun.com");
+  message += String( "ToDo: Do the SoftAP configuration here. Set up the public and private key for data.sparkfun.com");
 
-
-  String temp_WiFiSSID = server.arg("EEPROM_WiFiSSID");
-  String temp_WiFiPassword = server.arg("EEPROM_WiFiPassword");
   String temp_PhantHost = server.arg("EEPROM_PhantHost");
   String temp_PublicKey = server.arg("EEPROM_PublicKey");
   String temp_PrivateKey = server.arg("EEPROM_PrivateKey");
-  if( temp_WiFiSSID.length() > 0 && temp_WiFiPassword.length() > 0 && 
-      temp_PhantHost.length() > 0 && temp_PublicKey.length() > 0 && temp_PrivateKey.length() > 0 ) 
+  if( temp_PhantHost.length() > 0 && temp_PublicKey.length() > 0 && temp_PrivateKey.length() > 0 ) 
   {
     message += String( "<h3>UPDATED THE EEPROM</h3>");
     
     message += String( "<table>");
-    message += String( "<tr><th>WiFiSSID</th><td>")+ temp_WiFiSSID + "</td></tr>";
-    message += String( "<tr><th>WiFiPassword</th><td>")+ temp_WiFiPassword + "</td></tr>";
     message += String( "<tr><th>PhantHost</th><td>")+ temp_PhantHost + "</td></tr>";
     message += String( "<tr><th>PublicKey</th><td>")+ temp_PublicKey + "</td></tr>";
-    message += String( "P<tr><th>rivateKey</th><td>")+ temp_PrivateKey + "</td></tr>";
+    message += String( "<tr><th>rivateKey</th><td>")+ temp_PrivateKey + "</td></tr>";
     message += String( "</table>");
 
-    temp_WiFiSSID.toCharArray(EEPROM_WiFiSSID, 32 ); 
-    temp_WiFiPassword.toCharArray(EEPROM_WiFiPassword, 64 ); 
     temp_PhantHost.toCharArray(EEPROM_PhantHost, 64 ); 
     temp_PublicKey.toCharArray(EEPROM_PublicKey, 21 ); 
     temp_PrivateKey.toCharArray(EEPROM_PrivateKey, 21 ); 
@@ -286,19 +309,12 @@ void handleConfig() {
 
     message += "Done... Reconnecting...<a href='/'>Home</a><br />";
     server.send(200, "text/html", message);
-    connectWiFi(30);
     return ; 
   }
 
 
   message += String( "<form action='/config' method='get' >");
-        
-  message += String( "<h2>WiFi configuration</h2>");
-  message += String( "<table>" );
-  message += String( "<tr><th><label>SSID: </th><td><input name='EEPROM_WiFiSSID' type='text' value='") + String( EEPROM_WiFiSSID ) + String( "' /></label></td></tr>");
-  message += String( "<tr><th><label>Password: </th><td><input name='EEPROM_WiFiPassword' type='text' length='64' value='") + String( EEPROM_WiFiPassword ) + String( "' /></label></td></tr>");
-  message += String( "</table>" );
-  
+
   message += String( "<h2>Phant configuration</h2>");
   message += String( "<table>" );
   message += String( "<tr><th><label>PhantHost: </th><td><input name='EEPROM_PhantHost' type='text' value='") + String( EEPROM_PhantHost ) + String( "'/></label></td></tr>");
@@ -338,21 +354,14 @@ void WriteEEPROM() {
   EEPROM.begin(512);
   delay(10);
 
-  
-  for (int i = 0; i < 32; ++i) {
-    EEPROM.write(i, EEPROM_WiFiSSID[i]); 
+  for (int i = 0; i < 64; ++i) {    
+    EEPROM.write(i, EEPROM_PhantHost[i] ); 
   }
-  for (int i = 32; i < 32+64; ++i) {
-    EEPROM.write(i, EEPROM_WiFiPassword[i-32] ); 
+  for (int i = 64; i < 64+21; ++i) {
+    EEPROM.write(i, EEPROM_PublicKey[i-(64)] );
   }
-  for (int i = 32+64; i < 32+64+64; ++i) {    
-    EEPROM.write(i, EEPROM_PhantHost[i-(32+64)] ); 
-  }
-  for (int i = 32+64+64; i < 32+64+64+21; ++i) {
-    EEPROM.write(i, EEPROM_PublicKey[i-(32+64+64)] );
-  }
-  for (int i = 32+64+64+21; i < 32+64+64+21+21; ++i) {
-    EEPROM.write(i, EEPROM_PrivateKey[i-(32+64+64+21)] );
+  for (int i = 64+21; i < 64+21+21; ++i) {
+    EEPROM.write(i, EEPROM_PrivateKey[i-(64+21)] );
   }
   EEPROM.commit();
   Serial.println("Done...");
@@ -362,45 +371,64 @@ void ReadEEPROM() {
   EEPROM.begin(512);
   delay(10);
 
-  Serial.print("Reading EEPROM_WiFiSSID");
-  for (int i = 0; i < 32; ++i) {
-    EEPROM_WiFiSSID[i] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_WiFiSSID ) );
-
-  Serial.print("Reading EEPROM_WiFiPassword");
-  for (int i = 32; i < 32+64; ++i) {
-    EEPROM_WiFiPassword[i-32] = char(EEPROM.read(i));
-  }
-  Serial.println(" = " + String( EEPROM_WiFiPassword ) );
-
   Serial.print("Reading EEPROM_PhantHost");
-  for (int i = 32+64; i < 32+64+64; ++i) {
-    EEPROM_PhantHost[i-(32+64)] = char(EEPROM.read(i));
+  for (int i = 0; i < 64; ++i) {
+    EEPROM_PhantHost[i] = char(EEPROM.read(i));
   }
   Serial.println(" = " + String( EEPROM_PhantHost ) ); 
   
   Serial.print("Reading EEPROM_PublicKey");
-  for (int i = 32+64+64; i < 32+64+64+21; ++i) {
-    EEPROM_PublicKey[i-(32+64+64)] = char(EEPROM.read(i));
+  for (int i = 64; i < 64+21; ++i) {
+    EEPROM_PublicKey[i-(64)] = char(EEPROM.read(i));
   }
   Serial.println(" = " + String( EEPROM_PublicKey ) );    
   
   Serial.print("Reading EEPROM_PrivateKey");
-  for (int i = 32+64+64+21; i < 32+64+64+21+21; ++i) {
-    EEPROM_PrivateKey[i-(32+64+64+21)] = char(EEPROM.read(i));
+  for (int i = 64+21; i < 64+21+21; ++i) {
+    EEPROM_PrivateKey[i-(64+21)] = char(EEPROM.read(i));
   }
   Serial.println(" = " + String( EEPROM_PrivateKey ) );  
 }
+/*
+void ListAP() {
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
 
-bool connectWiFi( unsigned char attempts )
-{
+  Serial.println("");Serial.println("");
+  delay(100);
+  int networkCount = WiFi.scanNetworks();
+  Serial.println( String( "Scan done, found ") + String( networkCount ) + String(" networks") );
+  for (int i = 0; i < networkCount; ++i) {
+    // Print SSID and RSSI for each network found
+    Serial.print( String(i) + String( ") " ) );
+    Serial.print( String("[") + WiFi.RSSI(i) + String("]") );
+    Serial.print( String(", Name=") + WiFi.SSID(i) );
+    Serial.print( String( (WiFi.encryptionType(i) == ENC_TYPE_NONE)? " (NOT encrypted)":" ")  );
+    
+    Serial.println("");
+  }
+  delay(100);
+}
+
+void CreateSoftAP() {
+
+  WiFi.softAP( deviceName );
+  Serial.println("softAP created - " + String( deviceName ) );
+
+  
+}
+
+bool connectWiFi( ) {
+ 
+
+  
   Serial.println(""); 
   Serial.print("[Wifi] Connecting to ");
   Serial.print(EEPROM_WiFiSSID);
     
   // Set WiFi mode to station (as opposed to AP or AP_STA)
   WiFi.mode(WIFI_STA);
+  unsigned char attempts = 100 ; 
   
   // WiFI.begin([ssid], [passkey]) initiates a WiFI connection
   // to the stated [ssid], using the [passkey] as a WPA, WPA2,
@@ -422,6 +450,17 @@ bool connectWiFi( unsigned char attempts )
       Serial.println("[Wifi] WiFi connected");
       Serial.print("[Wifi] IP address: "); 
       Serial.println(WiFi.localIP());
+
+      // Start the DNS 
+      // This allows you to type in the name of the ESP into a browser and
+      // It will show up. 
+      if (!mdns.begin( deviceName , WiFi.localIP())) {
+        Serial.println("[Wifi] Error setting up MDNS responder!");
+      } else {
+        Serial.println("[Wifi] DNS Name: " + String(deviceName) ); 
+      }
+     
+      // Everything looks good. 
       return true ; 
       break ; 
     }
@@ -433,6 +472,14 @@ bool connectWiFi( unsigned char attempts )
     attempts--; 
     Serial.print(".");
   }
+
+  Serial.println("");
+  Serial.print("[Wifi] Failed to connect");
+
+  // Convert into AP Mode. 
+  ListAP(); 
+  CreateSoftAP();
+  
   return false; 
 }
-
+*/
