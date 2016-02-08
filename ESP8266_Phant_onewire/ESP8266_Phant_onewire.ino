@@ -13,11 +13,10 @@
  * https://data.sparkfun.com/ 
  */
 
-#include <ESP8266WiFi.h>        // Include the ESP8266 WiFi library. (Works a lot like the Arduino WiFi library.)
-#include <ESP8266HTTPClient.h>  // Include the ESP8266 wifi http client. 
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h> // Gives the ESP a name on the network. 
-#include <EEPROM.h>
+#include <ESP8266WiFi.h>        // Allowes the ESP to connect to wifi access points 
+#include <ESP8266HTTPClient.h>  // Allowes the ESP to send HTTP Requests. 
+#include <ESP8266WebServer.h>   // Allowes the ESP to recv HTTP Requests. 
+#include <EEPROM.h>             // Allowes for write to the EPROM
 
 // WiFiManager library
 // https://github.com/tzapu/WiFiManager
@@ -34,26 +33,27 @@
 // EPROM MEMORY //
 //////////////////
 // Phant 
-char EEPROM_PhantHost[64] = "data.sparkfun.com" ; 
-char EEPROM_PublicKey[21] = "VGXNn1WangTMQg6G8Qr2";  // Your public key 
+char EEPROM_PhantHost[64]  = "data.sparkfun.com" ; 
+char EEPROM_PublicKey[21]  = "VGXNn1WangTMQg6G8Qr2"; // Your public key 
 char EEPROM_PrivateKey[21] = "9Ygo8kqj8ZswRbYemRz5"; // Your private key 
-
 
 //////////////
 // One Wire //
 //////////////
-// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
-// on pin 10 (a 4.7K resistor is necessary)
-OneWire oneWire(D6);
-
-// Pass our oneWire reference to Dallas Temperature. 
-DallasTemperature sensors(&oneWire);
+/** 
+ * Setup a oneWire instance to communicate with any OneWire devices (not 
+ * just Maxim/Dallas temperature ICs). A 4.7K resistor connected between 
+ * data and 5v is nessary. 
+ * 
+ * More information: https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf
+ */
+OneWire oneWire(D6); 
+DallasTemperature sensors(&oneWire); 
 
 /////////////////
 // Post Timing //
 /////////////////
-
-/* 
+/** 
  * How much data can I push?
  * Each stream has a maximum of 50mb. After you hit the limit, the oldest data 
  * will be erased. (These limitations can be removed if installed on your own 
@@ -70,13 +70,16 @@ DallasTemperature sensors(&oneWire);
  */
 const unsigned long postRate = 30 * 1000;
 
-
-
-WiFiClient        client; // Create an ESP8266 WiFiClient class to connect 
+////////////////////////////
+// HTTP Client and server //
+////////////////////////////
+WiFiClient        client; 
 ESP8266WebServer  server(80);
 
+// Other variables. 
 char deviceName[32] ; 
 byte ledStatus = LOW;     
+
 
 void setup() {
   // Generate the device name 
@@ -89,7 +92,7 @@ void setup() {
   Serial.begin(115200);
   delay(10); // The serial port takes a little bit of time to fully start up. 
   Serial.println(""); Serial.println(""); Serial.println("");
-  Serial.println("[Info] VHS - ESP + DS1820");
+  Serial.println("[Info] VHS - ESP + DS1820B");
   Serial.println("[Info] Chip ID: " + String( ESP.getChipId()) );  
 
   // Get the MAC addres 
@@ -99,9 +102,9 @@ void setup() {
   Serial.print(mac[2],HEX); Serial.print(":"); Serial.print(mac[3],HEX); Serial.print(":"); Serial.print(mac[4],HEX); 
   Serial.print(":"); Serial.println(mac[5],HEX);
   
-
   // WiFiManager
   // Local intialization. Once its business is done, there is no need to keep it around
+  Serial.println("[Info] 
   WiFiManager wifiManager;
   wifiManager.autoConnect(deviceName);
   
@@ -122,8 +125,7 @@ void setup() {
 
 
 void loop()
-{
-  
+{  
   // If we are not connected to the network then we should to connect.  
   if (WiFi.status() != WL_CONNECTED) { 
     WiFiManager wifiManager;
@@ -132,176 +134,78 @@ void loop()
   }
 
   // Check for incoming HTTP requests and proccess them if needed. 
-  server.handleClient();
-  
+  server.handleClient();  
 
   // Check the tempature and update the server if needed. 
   static unsigned long previousMillisTemp = 0 ; 
   unsigned long currentMillisTemp = millis();
-  if(currentMillisTemp - previousMillisTemp >= postRate ) 
-  {   
-    // Flip the LED 
-    ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
-    digitalWrite(BUILTIN_LED, ledStatus);
+  if(currentMillisTemp - previousMillisTemp < postRate ) {
+    // Not enught time has passed. Nothing to do....  
+    delay(100);
+    return ; 
+  }
 
-    Serial.print("[Info] Goto http://"); 
-    Serial.print(WiFi.localIP());
-    Serial.println(" to configure the device. "); 
+  // The timer has expired. Update the server with the current value. 
+  previousMillisTemp = currentMillisTemp;  
   
+  // Flip the LED 
+  ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
+  digitalWrite(BUILTIN_LED, ledStatus);
 
-    if( sensors.getDeviceCount() > 0  ) {  
-      sensors.requestTemperatures() ; // Send the command to get temperatures
-      float celsius = sensors.getTempCByIndex(0); 
+  // Remind the user how to update the devices configuration. 
+  Serial.print("[Info] Goto http://"); 
+  Serial.print(WiFi.localIP());
+  Serial.println(" to configure the device. "); 
+
+  // Check to see if we have a device connected. 
+  if( sensors.getDeviceCount() <= 0  ) {  
+     Serial.println("[Info] Error: No OneWire devices detected. Nothing to do..."); 
+     return ; 
+  }
+
+  // Send the command to get temperatures
+  sensors.requestTemperatures() ; 
+  float celsius = sensors.getTempCByIndex(0); 
+
+  // Generate the URL based saved settings and the current tempature. 
+  // http://data.sparkfun.com/input/VGXNn1WangTMQg6G8Qr2.txt?private_key=9Ygo8kqj8ZswRbYemRz5&celsius=0.0
+  String url = "http://" ;
+  url += String( EEPROM_PhantHost ) ;
+  url += "/input/" ;
+  url += String( EEPROM_PublicKey ) ; 
+  url += ".txt?private_key=" ;
+  url += String( EEPROM_PrivateKey ) ; 
+  url += "&celsius=" ;
+  url += String( celsius ) ; 
   
-      // http://data.sparkfun.com/input/VGXNn1WangTMQg6G8Qr2.txt?private_key=9Ygo8kqj8ZswRbYemRz5
-      String url = "http://" ;
-      url += String( EEPROM_PhantHost ) ;
-      url += "/input/" ;
-      url += String( EEPROM_PublicKey ) ; 
-      url += ".txt?private_key=" ;
-      url += String( EEPROM_PrivateKey ) ; 
-      url += "&celsius=" ;
-      url += String( celsius ) ; 
-      
-      
-      HTTPClient http;
-      http.begin(url); //HTTP
-      Serial.println("[HTTP.Client] GET " +String(url) );
-      // start connection and send HTTP header
-      int httpCode = http.GET();
-  
-      // httpCode will be negative on error
-      if(httpCode > 0) {
-          // HTTP header has been send and Server response header has been handled
-          Serial.printf("[HTTP.Client] http.code: %d\n", httpCode);
-          String payload = http.getString();
-          Serial.println(payload);
+  // Send the HTTP REST request to the server 
+  Serial.println("[HTTP.Client] GET " + String(url) );
+        
+  // Start connection and send HTTP header
+  HTTPClient http;
+  http.begin(url);
+
+  // Wait on the response. 
+  // Once we recive a response or timeout the httpCode will be updated
+  int httpCode = http.GET();        
+  if(httpCode > 0) {
+      Serial.printf("[HTTP.Client] http.code: %d ", httpCode);
+      if( httpCode == 200 ) { 
+        // HTTP header has been send and Server response header has been handled
+        Serial.println("OK - Everything is good" );  
       } else {
-          // Serial.printf("[HTTP.Client] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-          Serial.printf("[HTTP.Client] GET... failed, error: %d\n", httpCode);
+        Serial.println("???? - Something strange happened. Check the error code https://en.wikipedia.org/wiki/List_of_HTTP_status_codes");
       }
-      http.end();
-  
-      // Only do this at the end. If there is an error and we don't sent to the server 
-      // We want to try again ASAP. 
-      previousMillisTemp = currentMillisTemp;         
-    }
-  }
-
-  delay(100);
-}
-
-/*
-bool GetTemp (float * celsius ) {
-  byte i;
-  byte present = 0;
-  byte type_s;
-  byte data[12];
-  byte addr[8];
-
-  if( celsius == NULL ) {
-    return false; 
-  }
-  
-  // There is an issue here that if there are more then one sensor we want to be able to get the current temp from each one. 
-  // ToDo: what do we do if there is more then one temp sensor? 
-  // Teh following command will reset the search so only the first sensor will ever be found. 
-  ds.reset_search();
-
-  // Search the OneWire bus for a device. 
-  if ( !ds.search(addr)) {
-    Serial.println("[OneWire] FYI: No more oneWire Sensors found " );
-    ds.reset_search(); // Reset the search back to the start. 
-    return false; 
-  }
-  
-  Serial.print("[OneWire] Address: ");
-  for( i = 0; i < 8; i++) {
-    if( addr[i] < 10 ) { 
-      Serial.print("0");
-    }
-    Serial.print(addr[i], HEX);
-  }
-  Serial.print(", ");
-
-  if (OneWire::crc8(addr, 7) != addr[7]) {
-      Serial.println("CRC is not valid!");
-      return false; 
-  }
-  // Serial.println();
- 
-  // the first ROM byte indicates which chip
-  switch (addr[0]) {
-    case 0x10:
-      Serial.print("Chip = DS18S20, ");  // or old DS1820
-      type_s = 1;
-      break;
-    case 0x28: // We have this one 
-      Serial.print("Chip = DS18B20, ");
-      type_s = 0;
-      break;
-    case 0x22:
-      Serial.print("Chip = DS1822, ");
-      type_s = 0;
-      break;
-    default:
-      Serial.println("[OneWire] Device is not a DS18x20 family device.");
-      return false; 
-  } 
-
-  ds.reset();
-  ds.select(addr);
-  ds.write(0x44, 1);        // start conversion, with parasite power on at the end
-  
-  // delay(1000);     // maybe 750ms is enough, maybe not
-  // we might do a ds.depower() here, but the reset will take care of it.
-  
-  present = ds.reset();
-  ds.select(addr);    
-  ds.write(0xBE);         // Read Scratchpad
-
-  // Serial.print("  Data = ");
-  // Serial.print(present, HEX);
-  // Serial.print(" ");
-  for ( i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-    // Serial.print(data[i], HEX);
-    // Serial.print(" ");
-  }
-  // Serial.print(" CRC=");
-  // Serial.print(OneWire::crc8(data, 8), HEX);
-  // Serial.println();
-
-  // Convert the data to actual temperature
-  // because the result is a 16 bit signed integer, it should
-  // be stored to an "int16_t" type, which is always 16 bits
-  // even when compiled on a 32 bit processor.
-  int16_t raw = (data[1] << 8) | data[0];
-  if (type_s) {
-    raw = raw << 3; // 9 bit resolution default
-    if (data[7] == 0x10) {
-      // "count remain" gives full 12 bit resolution
-      raw = (raw & 0xFFF0) + 12 - data[6];
-    }
+      Serial.println(http.getString());
   } else {
-    byte cfg = (data[4] & 0x60);
-    // at lower res, the low bits are undefined, so let's zero them
-    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
-    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
-    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
-    //// default is 12 bit resolution, 750 ms conversion time
+      Serial.printf("[HTTP.Client] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
-  *celsius = (float)raw / 16.0;
-  Serial.print("Temperature = ");
-  Serial.print(*celsius);
-  Serial.println(" Celsius");
-  return true; 
+  http.end();
 }
-*/
+
 void handleConfig() {
   Serial.println("[HTTP.Server] HTTP.Requst GET /config");
   String message = "<!DOCTYPE HTML>\r\n<html><h1>VHS: ESP + DS1820 - Configuration page</h1>";
-  message += String( "ToDo: Do the SoftAP configuration here. Set up the public and private key for data.sparkfun.com");
 
   // Check to see if the values have been changed. 
   String temp_PhantHost = server.arg("EEPROM_PhantHost");
@@ -313,7 +217,7 @@ void handleConfig() {
     message += String( "<table>");
     message += String( "<tr><th>PhantHost</th><td>")+ temp_PhantHost + "</td></tr>";
     message += String( "<tr><th>PublicKey</th><td>")+ temp_PublicKey + "</td></tr>";
-    message += String( "<tr><th>rivateKey</th><td>")+ temp_PrivateKey + "</td></tr>";
+    message += String( "<tr><th>PrivateKey</th><td>")+ temp_PrivateKey + "</td></tr>";
     message += String( "</table>");
 
     temp_PhantHost.toCharArray(EEPROM_PhantHost, 64 ); 
@@ -323,7 +227,7 @@ void handleConfig() {
     // Write the values to the chip
     WriteEEPROM();
 
-    message += "Done... Reconnecting...<a href='/'>Home</a><br />";
+    message += String( "Done... Go back <a href='/'>Home</a><br />");
     server.send(200, "text/html", message);
     return ; 
   }
@@ -379,7 +283,7 @@ void WriteEEPROM() {
     EEPROM.write(i, EEPROM_PrivateKey[i-(64+21)] );
   }
   EEPROM.commit();
-  Serial.println("Done...");
+  Serial.println("[EEPROM] Done...");
 }
 
 void ReadEEPROM() {
@@ -403,5 +307,6 @@ void ReadEEPROM() {
   for (int i = 64+21; i < 64+21+21; ++i) {
     EEPROM_PrivateKey[i-(64+21)] = char(EEPROM.read(i));
   }
-  Serial.println(" = " + String( EEPROM_PrivateKey ) );  
+  Serial.println(" = " + String( EEPROM_PrivateKey ) );    
+  Serial.println("[EEPROM] Done...");
 }
