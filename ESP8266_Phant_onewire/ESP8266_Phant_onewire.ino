@@ -104,7 +104,6 @@ void setup() {
   
   // WiFiManager
   // Local intialization. Once its business is done, there is no need to keep it around
-  Serial.println("[Info] 
   WiFiManager wifiManager;
   wifiManager.autoConnect(deviceName);
   
@@ -253,7 +252,7 @@ void handleConfig() {
 
 void handleRoot() {
   Serial.println("[HTTP.Server] HTTP.Requst GET /");
-  String message = "<h1>VHS: ESP + DS1820</h1>";
+  String message = "<!DOCTYPE HTML>\r\n<html><h1>VHS: ESP + DS1820</h1>";
 
   // Check to see if we can get the current Temperature   
   if( sensors.getDeviceCount() > 0 ){
@@ -263,7 +262,7 @@ void handleRoot() {
     message += String( "<p>Error: Could not get the current Temperature</p>");
   }
 
-  message += String( "<p><a href='/config'>Configure this device...</a></p>");
+  message += String( "<p><a href='/config'>Configure this device...</a></p></html>");
   server.send(200, "text/html", message );
 }
 
