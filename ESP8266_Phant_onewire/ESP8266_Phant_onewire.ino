@@ -196,6 +196,7 @@ void loop()
         Serial.println("???? - Something strange happened. Check the error code https://en.wikipedia.org/wiki/List_of_HTTP_status_codes");
       }
       Serial.println(http.getString());
+      Serial.println(String( "View results here: https://") + String( EEPROM_PhantHost ) + String( "/streams/") + String( EEPROM_PublicKey) );
   } else {
       Serial.printf("[HTTP.Client] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
@@ -258,6 +259,7 @@ void handleRoot() {
   if( sensors.getDeviceCount() > 0 ){
     sensors.requestTemperatures() ; 
     message += String( "<p>Celsius=") + String( sensors.getTempCByIndex(0)  ) + String("</p>");    
+    message += String( "<p>View full history <a href='https://") + String(EEPROM_PhantHost) + String("/streams/") + String(EEPROM_PublicKey) + String("'>full history</a> here</p>") ;
   } else {
     message += String( "<p>Error: Could not get the current Temperature</p>");
   }
