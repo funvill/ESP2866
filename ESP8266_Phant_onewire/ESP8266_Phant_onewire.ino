@@ -4,20 +4,31 @@
  * 
  * More information: https://github.com/funvill/ESP2866
  * 
+ * Libraries used
+ * https://github.com/esp8266/Arduino 
  * https://github.com/tzapu/WiFiManager
+ * https://github.com/milesburton/Arduino-Temperature-Control-Library 
+ * 
+ * Data Store:
+ * https://data.sparkfun.com/ 
  */
 
-#include <ESP8266WiFi.h>  // Include the ESP8266 WiFi library. (Works a lot like the Arduino WiFi library.)
-#include <ESP8266HTTPClient.h> // Include the ESP8266 wifi http client. 
+#include <ESP8266WiFi.h>        // Include the ESP8266 WiFi library. (Works a lot like the Arduino WiFi library.)
+#include <ESP8266HTTPClient.h>  // Include the ESP8266 wifi http client. 
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h> // Gives the ESP a name on the network. 
-#include <OneWire.h>
 #include <EEPROM.h>
 
-//needed for library
+// WiFiManager library
+// https://github.com/tzapu/WiFiManager
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
-#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
+#include <WiFiManager.h>          
+
+// One Wire Temp Sensor 
+// https://github.com/milesburton/Arduino-Temperature-Control-Library 
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 //////////////////
 // EPROM MEMORY //
@@ -31,7 +42,12 @@ char EEPROM_PrivateKey[21] = "9Ygo8kqj8ZswRbYemRz5"; // Your private key
 //////////////
 // One Wire //
 //////////////
-OneWire  ds(D6);  // on pin 10 (a 4.7K resistor is necessary)
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+// on pin 10 (a 4.7K resistor is necessary)
+OneWire oneWire(D6);
+
+// Pass our oneWire reference to Dallas Temperature. 
+DallasTemperature sensors(&oneWire);
 
 /////////////////
 // Post Timing //
@@ -55,16 +71,16 @@ OneWire  ds(D6);  // on pin 10 (a 4.7K resistor is necessary)
 const unsigned long postRate = 30 * 1000;
 
 
+
 WiFiClient        client; // Create an ESP8266 WiFiClient class to connect 
 ESP8266WebServer  server(80);
-MDNSResponder     mdns;
-char deviceName[32] ; 
 
+char deviceName[32] ; 
 byte ledStatus = LOW;     
 
 void setup() {
   // Generate the device name 
-  sprintf( deviceName, "ESP%d", ESP.getChipId() ); 
+  sprintf( deviceName, "esp%d", ESP.getChipId() ); 
 
   // Set up the status LED 
   pinMode(BUILTIN_LED, OUTPUT);
@@ -73,10 +89,16 @@ void setup() {
   Serial.begin(115200);
   delay(10); // The serial port takes a little bit of time to fully start up. 
   Serial.println(""); Serial.println(""); Serial.println("");
-  Serial.println("[info] VHS - ESP + DS1820");
-  Serial.println("[info] Chip: " + String( ESP.getChipId()) );  
+  Serial.println("[Info] VHS - ESP + DS1820");
+  Serial.println("[Info] Chip ID: " + String( ESP.getChipId()) );  
 
-
+  // Get the MAC addres 
+  byte mac[6]; 
+  WiFi.macAddress(mac);  
+  Serial.print("[Info] MAC: "); Serial.print(mac[0],HEX); Serial.print(":"); Serial.print(mac[1],HEX); Serial.print(":"); 
+  Serial.print(mac[2],HEX); Serial.print(":"); Serial.print(mac[3],HEX); Serial.print(":"); Serial.print(mac[4],HEX); 
+  Serial.print(":"); Serial.println(mac[5],HEX);
+  
 
   // WiFiManager
   // Local intialization. Once its business is done, there is no need to keep it around
@@ -84,18 +106,8 @@ void setup() {
   wifiManager.autoConnect(deviceName);
   
   // Print the wifi connection details. 
-  Serial.println("[Wifi] WiFi connected");
-  Serial.print("[Wifi] IP address: "); 
-  Serial.println(WiFi.localIP());
-
-  // Start the DNS 
-  // This allows you to type in the name of the ESP into a browser and
-  // It will show up. 
-  if (mdns.begin( deviceName , WiFi.localIP())) {
-    Serial.println("[Wifi] DNS Name: " + String(deviceName) ); 
-  }
-
-
+  Serial.println("[WiFi] WiFi connected");
+  
   // Read the presistent memory off the chip 
   ReadEEPROM(); 
 
@@ -103,6 +115,9 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/config", handleConfig);
   server.begin();
+
+  // Start up the temp sensor libary 
+  sensors.begin();
 }
 
 
@@ -118,8 +133,6 @@ void loop()
 
   // Check for incoming HTTP requests and proccess them if needed. 
   server.handleClient();
-  mdns.update(); 
-
   
 
   // Check the tempature and update the server if needed. 
@@ -131,13 +144,15 @@ void loop()
     ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
     digitalWrite(BUILTIN_LED, ledStatus);
 
-    Serial.print("[Wifi] IP address: "); 
-    Serial.println(WiFi.localIP());
+    Serial.print("[Info] Goto http://"); 
+    Serial.print(WiFi.localIP());
+    Serial.println(" to configure the device. "); 
+  
 
-    // Get the temp 
-    float celsius = 0.0f;
-    if( GetTemp (&celsius ) ){
-
+    if( sensors.getDeviceCount() > 0  ) {  
+      sensors.requestTemperatures() ; // Send the command to get temperatures
+      float celsius = sensors.getTempCByIndex(0); 
+  
       // http://data.sparkfun.com/input/VGXNn1WangTMQg6G8Qr2.txt?private_key=9Ygo8kqj8ZswRbYemRz5
       String url = "http://" ;
       url += String( EEPROM_PhantHost ) ;
@@ -154,7 +169,7 @@ void loop()
       Serial.println("[HTTP.Client] GET " +String(url) );
       // start connection and send HTTP header
       int httpCode = http.GET();
-
+  
       // httpCode will be negative on error
       if(httpCode > 0) {
           // HTTP header has been send and Server response header has been handled
@@ -166,7 +181,7 @@ void loop()
           Serial.printf("[HTTP.Client] GET... failed, error: %d\n", httpCode);
       }
       http.end();
-
+  
       // Only do this at the end. If there is an error and we don't sent to the server 
       // We want to try again ASAP. 
       previousMillisTemp = currentMillisTemp;         
@@ -176,7 +191,7 @@ void loop()
   delay(100);
 }
 
-
+/*
 bool GetTemp (float * celsius ) {
   byte i;
   byte present = 0;
@@ -282,19 +297,19 @@ bool GetTemp (float * celsius ) {
   Serial.println(" Celsius");
   return true; 
 }
-
+*/
 void handleConfig() {
   Serial.println("[HTTP.Server] HTTP.Requst GET /config");
   String message = "<!DOCTYPE HTML>\r\n<html><h1>VHS: ESP + DS1820 - Configuration page</h1>";
   message += String( "ToDo: Do the SoftAP configuration here. Set up the public and private key for data.sparkfun.com");
 
+  // Check to see if the values have been changed. 
   String temp_PhantHost = server.arg("EEPROM_PhantHost");
   String temp_PublicKey = server.arg("EEPROM_PublicKey");
   String temp_PrivateKey = server.arg("EEPROM_PrivateKey");
   if( temp_PhantHost.length() > 0 && temp_PublicKey.length() > 0 && temp_PrivateKey.length() > 0 ) 
   {
-    message += String( "<h3>UPDATED THE EEPROM</h3>");
-    
+    message += String( "<h3>UPDATED THE EEPROM</h3>");    
     message += String( "<table>");
     message += String( "<tr><th>PhantHost</th><td>")+ temp_PhantHost + "</td></tr>";
     message += String( "<tr><th>PublicKey</th><td>")+ temp_PublicKey + "</td></tr>";
@@ -304,7 +319,8 @@ void handleConfig() {
     temp_PhantHost.toCharArray(EEPROM_PhantHost, 64 ); 
     temp_PublicKey.toCharArray(EEPROM_PublicKey, 21 ); 
     temp_PrivateKey.toCharArray(EEPROM_PrivateKey, 21 ); 
-        
+
+    // Write the values to the chip
     WriteEEPROM();
 
     message += "Done... Reconnecting...<a href='/'>Home</a><br />";
@@ -312,9 +328,9 @@ void handleConfig() {
     return ; 
   }
 
-
+  // Let the user configure the variables. 
   message += String( "<form action='/config' method='get' >");
-
+  
   message += String( "<h2>Phant configuration</h2>");
   message += String( "<table>" );
   message += String( "<tr><th><label>PhantHost: </th><td><input name='EEPROM_PhantHost' type='text' value='") + String( EEPROM_PhantHost ) + String( "'/></label></td></tr>");
@@ -333,13 +349,12 @@ void handleConfig() {
 
 void handleRoot() {
   Serial.println("[HTTP.Server] HTTP.Requst GET /");
-
   String message = "<h1>VHS: ESP + DS1820</h1>";
 
-  float celsius = 0.0f;
-  // Check to see if we can get the current Temperature 
-  if( GetTemp (&celsius ) ){
-    message += String( "<p>Celsius=") + String( celsius ) + String("</p>");    
+  // Check to see if we can get the current Temperature   
+  if( sensors.getDeviceCount() > 0 ){
+    sensors.requestTemperatures() ; 
+    message += String( "<p>Celsius=") + String( sensors.getTempCByIndex(0)  ) + String("</p>");    
   } else {
     message += String( "<p>Error: Could not get the current Temperature</p>");
   }
@@ -350,7 +365,7 @@ void handleRoot() {
 
 
 void WriteEEPROM() {
-  Serial.println("Writing EEPROM");
+  Serial.println("[EEPROM] Writing variables to EEPROM");
   EEPROM.begin(512);
   delay(10);
 
@@ -368,118 +383,25 @@ void WriteEEPROM() {
 }
 
 void ReadEEPROM() {
+  Serial.println("[EEPROM] Reading variables from EEPROM");
   EEPROM.begin(512);
   delay(10);
 
-  Serial.print("Reading EEPROM_PhantHost");
+  Serial.print("[EEPROM] Reading PhantHost");
   for (int i = 0; i < 64; ++i) {
     EEPROM_PhantHost[i] = char(EEPROM.read(i));
   }
   Serial.println(" = " + String( EEPROM_PhantHost ) ); 
   
-  Serial.print("Reading EEPROM_PublicKey");
+  Serial.print("[EEPROM] Reading PublicKey");
   for (int i = 64; i < 64+21; ++i) {
     EEPROM_PublicKey[i-(64)] = char(EEPROM.read(i));
   }
   Serial.println(" = " + String( EEPROM_PublicKey ) );    
   
-  Serial.print("Reading EEPROM_PrivateKey");
+  Serial.print("[EEPROM] Reading PrivateKey");
   for (int i = 64+21; i < 64+21+21; ++i) {
     EEPROM_PrivateKey[i-(64+21)] = char(EEPROM.read(i));
   }
   Serial.println(" = " + String( EEPROM_PrivateKey ) );  
 }
-/*
-void ListAP() {
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-
-  Serial.println("");Serial.println("");
-  delay(100);
-  int networkCount = WiFi.scanNetworks();
-  Serial.println( String( "Scan done, found ") + String( networkCount ) + String(" networks") );
-  for (int i = 0; i < networkCount; ++i) {
-    // Print SSID and RSSI for each network found
-    Serial.print( String(i) + String( ") " ) );
-    Serial.print( String("[") + WiFi.RSSI(i) + String("]") );
-    Serial.print( String(", Name=") + WiFi.SSID(i) );
-    Serial.print( String( (WiFi.encryptionType(i) == ENC_TYPE_NONE)? " (NOT encrypted)":" ")  );
-    
-    Serial.println("");
-  }
-  delay(100);
-}
-
-void CreateSoftAP() {
-
-  WiFi.softAP( deviceName );
-  Serial.println("softAP created - " + String( deviceName ) );
-
-  
-}
-
-bool connectWiFi( ) {
- 
-
-  
-  Serial.println(""); 
-  Serial.print("[Wifi] Connecting to ");
-  Serial.print(EEPROM_WiFiSSID);
-    
-  // Set WiFi mode to station (as opposed to AP or AP_STA)
-  WiFi.mode(WIFI_STA);
-  unsigned char attempts = 100 ; 
-  
-  // WiFI.begin([ssid], [passkey]) initiates a WiFI connection
-  // to the stated [ssid], using the [passkey] as a WPA, WPA2,
-  // or WEP passphrase.
-  WiFi.begin(EEPROM_WiFiSSID, EEPROM_WiFiPassword);
-
-  // Attempt to connect to the wifi connection.
-  while( attempts > 0 ) 
-  {
-    // Blink the LED
-    digitalWrite(BUILTIN_LED, ledStatus); // Write LED high/low
-    ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
-    
-    // Use the WiFi.status() function to check if the ESP8266
-    // is connected to a WiFi network.
-    if (WiFi.status() == WL_CONNECTED) {
-      // Print the wifi connection details. 
-      Serial.println("");
-      Serial.println("[Wifi] WiFi connected");
-      Serial.print("[Wifi] IP address: "); 
-      Serial.println(WiFi.localIP());
-
-      // Start the DNS 
-      // This allows you to type in the name of the ESP into a browser and
-      // It will show up. 
-      if (!mdns.begin( deviceName , WiFi.localIP())) {
-        Serial.println("[Wifi] Error setting up MDNS responder!");
-      } else {
-        Serial.println("[Wifi] DNS Name: " + String(deviceName) ); 
-      }
-     
-      // Everything looks good. 
-      return true ; 
-      break ; 
-    }
-    
-    // Delays allow the ESP8266 to perform critical tasks
-    // defined outside of the sketch. These tasks include
-    // setting up, and maintaining, a WiFi connection.
-    delay(100);
-    attempts--; 
-    Serial.print(".");
-  }
-
-  Serial.println("");
-  Serial.print("[Wifi] Failed to connect");
-
-  // Convert into AP Mode. 
-  ListAP(); 
-  CreateSoftAP();
-  
-  return false; 
-}
-*/
